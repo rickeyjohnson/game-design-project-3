@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://clx7sjqpqmiq0"
+path="res://.godot/imported/mcdonald_3min_slow_normal_breathing_more_pitch_variance.mp3-ca43d054e80fbac878b484a41edb02dd.mp3str"
+
+[deps]
+
+source_file="res://audio/background soundtrack/mcdonald_3min_slow_normal_breathing_more_pitch_variance.mp3"
+dest_files=["res://.godot/imported/mcdonald_3min_slow_normal_breathing_more_pitch_variance.mp3-ca43d054e80fbac878b484a41edb02dd.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

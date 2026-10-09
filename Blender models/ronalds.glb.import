@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://doulf2w72kggr"
-path="res://.godot/imported/tubes.glb-2b8521bf0959e4ad05d3984827ccd426.scn"
+uid="uid://hcjsckmnhttu"
+path="res://.godot/imported/ronalds.glb-9cb4c858635dc43dac2365ab2e0a1786.scn"
 
 [deps]
 
-source_file="res://Blender models/tubes.glb"
-dest_files=["res://.godot/imported/tubes.glb-2b8521bf0959e4ad05d3984827ccd426.scn"]
+source_file="res://Blender models/ronalds.glb"
+dest_files=["res://.godot/imported/ronalds.glb-9cb4c858635dc43dac2365ab2e0a1786.scn"]
 
 [params]
 

@@ -1,5 +1,18 @@
 extends Node3D
 const Geo = preload("res://scripts/geometry.gd")
+const DINER = preload("res://Blender models/ronalds.glb")
+const PLAY_PLACE = preload("res://Blender models/PLay place.glb")
+const APPLIANCES = preload("res://Blender models/appliances.glb")
+
+# Landmarks use the new Blender map's coordinates (metres).
+const SPAWN := Vector3(8, 0.3, -10)
+const STALKER_SPAWN := Vector3(3, 0.12, -1)
+const FUSE_POSITIONS := [Vector3(-16, 0.96, 2), Vector3(-12, 1.27, 14.5), Vector3(23.5, 0.99, 16)]
+const FUSE_APPROACHES := [Vector3(-16, 0.12, -0.3), Vector3(-12, 0.12, 12.7), Vector3(21.4, 0.12, 16)]
+const CELL_POSITIONS := [Vector3(0, 0.96, -4), Vector3(-19.3, 1.16, 16.2)]
+const BREAKER_POSITION := Vector3(18.82, 1.6, 13.2)
+const EXIT_POSITION := Vector3(-35.7, 1.5, 0)
+const FREEZER_OFFSET := Vector3(47, 0, 0)
 
 var obstacles: Array[AABB] = []
 var nav := AStarGrid2D.new()
@@ -8,55 +21,215 @@ var exit_light: OmniLight3D
 var flicker_light: OmniLight3D
 var batch_count := 0
 var source_mesh_count := 0
+var ball_count := 3600
+var ball_instances: MultiMesh
+var ball_origins: Array[Vector3] = []
+var ball_positions: Array[Vector3] = []
+var ball_active: Dictionary = {}
+var powered_lights: Array[OmniLight3D] = []
+var powered_fixtures: Array[MeshInstance3D] = []
+var _groups: Dictionary = {}
+var appliance_placements := 0
+var appliance_layout: Array[Dictionary] = []
 
 func _ready() -> void:
 	name = "Diner"
 	_import_diner()
-	_collision()
+	_import_appliances()
+	_commit_batches()
+	_shell_and_passages()
 	_ball_pit()
-	_play_tubes()
 	_decorate()
 	_navigation()
 
+func _process(delta: float) -> void:
+	_animate_balls(delta)
+
 func _import_diner() -> void:
-	# The diner export contains the room, booths, counter and pit enclosure.
-	# textures.glb duplicates this export; loading it again would overlap geometry.
-	var imported: Node3D = preload("res://Blender models/diningn area.glb").instantiate()
+	var imported := DINER.instantiate()
 	add_child(imported)
-	var groups: Dictionary = {}
 	for node in imported.find_children("*", "MeshInstance3D", true, false):
-		source_mesh_count += 1
-		if str(node.name).begins_with("Hidden_Depressor") or str(node.name).begins_with("FrontDoor"):
-			continue
 		var instance := node as MeshInstance3D
-		for surface in instance.mesh.get_surface_count():
-			var mat: Material = instance.get_active_material(surface)
-			# Chunk by material and 6 m cell to retain useful frustum culling.
-			var cell := Vector2i(floori(instance.global_position.x / 6.0), floori(instance.global_position.z / 6.0))
-			var key := "%s_%s" % [mat.get_instance_id(), cell]
-			if not groups.has(key):
-				var st := SurfaceTool.new()
-				st.begin(Mesh.PRIMITIVE_TRIANGLES)
-				var aged := mat.duplicate() as StandardMaterial3D
+		var title := str(instance.name)
+		source_mesh_count += 1
+		# Export helper volumes and the default cube are opaque in glTF.
+		# Replace the closed room shell and selected walls with real doorways.
+		if title in ["Cube", "FF_RoomShell", "DustVolume", "Freezer_FogVolume", "Wall_Kitchen_Front", "WalkIn_Freezer_Door", "Freezer_Wall_Left", "PlayGlass_0", "PlayGlass_1"] or title.begins_with("Bath_Sink") or title == "Bath_Mirror" or title.begins_with("StallDoor_"):
+			continue
+		if title.begins_with("PP_Ball") or title.begins_with("PP_Depressor"):
+			continue
+		# Flatten the exported sunken pit into a walkable shallow ball bed.
+		if title.begins_with("PP_Pit"):
+			continue
+		if title.begins_with("Freezer_Box") or title.begins_with("Freezer_Shelf"):
+			continue
+		if title.begins_with("Freezer_"):
+			instance.position += FREEZER_OFFSET
+			if title == "Freezer_Floor":
+				instance.position.y += 0.12
+		# The separate appliance kit supplies all booths and kitchen equipment.
+		if title.begins_with("BoothL_") or title.begins_with("BoothR_") or title.begins_with("KitchenPrep_") or title.begins_with("DeadRegister") or title.begins_with("DeepFryer_") or title.begins_with("FryerBasket_") or title.begins_with("FryerGlow_") or title in ["OrderingCounter", "FlatTop_Grill", "ExhaustHood"]:
+			continue
+		if title.begins_with("PlayGlass") or title.begins_with("Wall_Playplace_"):
+			# glTF lost the Blender transmission shader; restore readable glass.
+			var glass := Geo.material(Color(0.65, 0.78, 0.82, 0.065), 0.05)
+			glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			glass.cull_mode = BaseMaterial3D.CULL_DISABLED
+			glass.roughness = 0.08
+			instance.material_override = glass
+			instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		if title in ["PP_Box_0", "PP_Box_2"]:
+			var red_glass := Geo.material(Color(0.78, 0.22, 0.2, 0.2), 0.05)
+			red_glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			red_glass.cull_mode = BaseMaterial3D.CULL_DISABLED
+			instance.material_override = red_glass
+			instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		# Net planes also lost their procedural cutouts. Keep the supporting frame.
+		if title.begins_with("PP_Net"):
+			continue
+		_batch(instance)
+		var bounds: AABB = instance.global_transform * instance.get_aabb()
+		if title.begins_with("PP_ClimbPlat_"):
+			# The highest two platforms were excluded by the generic ground-level rule.
+			solid(Vector3(bounds.get_center().x, bounds.end.y - 0.015, bounds.get_center().z), Vector3(bounds.size.x, 0.03, bounds.size.z), false)
+		if title.begins_with("PP_Pillar_"):
+			# Leave walkable clearance beside the upper module supports.
+			solid(bounds.get_center(), Vector3(0.3, bounds.size.y, 0.3), false)
+		if title.begins_with("PP_Box_") and bounds.position.y > 2.0:
+			# The tubes are hollow; only their bottom panels support the player.
+			solid(Vector3(bounds.get_center().x, bounds.position.y + 0.04, bounds.get_center().z), Vector3(bounds.size.x, 0.08, bounds.size.z), false)
+			if title in ["PP_Box_0", "PP_Box_2"]:
+				Geo.box(self, Vector3(bounds.get_center().x, bounds.position.y + 0.015, bounds.get_center().z), Vector3(bounds.size.x, 0.03, bounds.size.z), Geo.material(Color("913b38")))
+		var floor_mesh := title.contains("Floor") or title in ["Base_Carpet", "EntrancePad", "Main_BackHall_Strip", "OutsidePad_L", "OutsidePad_R"]
+		if floor_mesh:
+			if bounds.size.y < 0.02:
+				bounds.position.y -= 0.08
+				bounds.size.y = 0.08
+			solid(bounds.get_center(), bounds.size, false)
+		elif bounds.position.y < 2.5 and bounds.end.y > 0.35 and not title.begins_with("PlayGlass") and not title.begins_with("PP_ClimbPlat_") and not title.begins_with("PP_Pillar_") and not title.contains("Sign") and not title.contains("Mirror"):
+			if title.begins_with("PP_ClimbRamp"):
+				var body := StaticBody3D.new()
+				var shape := CollisionShape3D.new()
+				shape.shape = instance.mesh.create_trimesh_shape()
+				body.transform = instance.global_transform
+				body.add_child(shape)
+				add_child(body)
+				obstacles.append(bounds)
+			else:
+				solid(bounds.get_center(), bounds.size)
+	remove_child(imported)
+	imported.free()
+
+func _commit_batches() -> void:
+	for key in _groups:
+		var combined := MeshInstance3D.new()
+		combined.name = "MapBatch_%d" % batch_count
+		combined.mesh = _groups[key].commit()
+		add_child(combined)
+		batch_count += 1
+	_groups.clear()
+
+func _import_appliances() -> void:
+	var source := APPLIANCES.instantiate()
+	add_child(source)
+	var y_scale := Vector3(1, 0.6, 1)
+	# The supplied final plan has tables by the play place, a central booth row,
+	# and customer drinks near the right end of the service wall.
+	var fittings := [
+		["Asset_BeverageSystem", Vector3(23, 0, 7), 0.0, y_scale],
+		["Asset_SodaFountain", Vector3(28, 0, 7), 0.0, y_scale],
+		# The hot cooking line runs along the rear wall of the staff kitchen.
+		["Asset_ClamshellGrill", Vector3(-12, 0, 19), 0.0, y_scale],
+		["Asset_ClamshellGrill", Vector3(-7, 0, 19), 0.0, y_scale],
+		["Asset_DeepFryer", Vector3(-1, 0, 19), 0.0, y_scale],
+		["Asset_DeepFryer", Vector3(2, 0, 19), 0.0, y_scale],
+		["Asset_FryArchStation", Vector3(6, 0, 19), 0.0, y_scale],
+		["Asset_CombiOven", Vector3(14, 0, 19), 0.0, y_scale],
+		# Prep, holding, and drinks sit between the cook line and service wall.
+		["Asset_AssemblyTable", Vector3(-12, 0, 14.5), 0.0, y_scale],
+		["Asset_AssemblyTable", Vector3(-5, 0, 14.5), 0.0, y_scale],
+		["Asset_AssemblyTable", Vector3(3, 0, 14.5), 0.0, y_scale],
+		["Asset_UHC", Vector3(-6, 0, 11.5), 0.0, y_scale],
+		["Asset_UHC", Vector3(2, 0, 11.5), 0.0, y_scale],
+		["Asset_Microwave", Vector3(-5, 1.13, 14.5), 0.0, y_scale],
+		["Asset_SodaFountain", Vector3(8, 0, 11.5), 0.0, y_scale],
+		["Asset_SoftServeMachine", Vector3(13, 0, 11.5), 0.0, y_scale],
+		["Asset_CoffeeBrewerUrns", Vector3(16, 0, 11.5), 0.0, y_scale],
+		# The supplied floor plan puts the freezer to the right of the kitchen.
+		["Asset_ReachInFridge", Vector3(21, 0, 18), 0.0, y_scale],
+		["Asset_ReachInFridge", Vector3(25, 0, 18), 0.0, y_scale],
+		["Asset_IceMachine", Vector3(27, 0, 14), PI / 2, y_scale],
+		["Asset_WalkInDoorModule", Vector3(19, 0, 16), PI / 2, Vector3.ONE]
+	]
+	for x in [-16, -8, 0, 8, 16]:
+		fittings.append(["Asset_Booth", Vector3(x, 0, 2), 0.0, Vector3.ONE])
+	for at in [Vector3(-25, 0, -4), Vector3(-17, 0, -4), Vector3(-9, 0, -4), Vector3(0, 0, -4), Vector3(13, 0, -4), Vector3(20, 0, -4), Vector3(28, 0, -4)]:
+		fittings.append(["Asset_Table", at, 0.0, Vector3.ONE])
+		fittings.append(["Asset_Chair", at + Vector3(-1.2, 0, 0), PI / 2, Vector3.ONE])
+		fittings.append(["Asset_Chair", at + Vector3(1.2, 0, 0), -PI / 2, Vector3.ONE])
+	var assemblies: Dictionary = {}
+	for group in source.get_children():
+		if not str(group.name).begins_with("Asset_"):
+			continue
+		var meshes: Array[MeshInstance3D] = []
+		var bounds := AABB()
+		for child in group.find_children("*", "MeshInstance3D", true, false):
+			var mesh := child as MeshInstance3D
+			if str(mesh.name).contains("_Label"):
+				continue
+			if str(group.name) == "Asset_WalkInDoorModule" and str(mesh.name).begins_with("Door"):
+				continue
+			if meshes.is_empty():
+				bounds = mesh.global_transform * mesh.get_aabb()
+			else:
+				bounds = bounds.merge(mesh.global_transform * mesh.get_aabb())
+			meshes.append(mesh)
+		assemblies[str(group.name)] = {"meshes": meshes, "bounds": bounds}
+	for fitting in fittings:
+		appliance_layout.append({"asset": fitting[0], "position": fitting[1]})
+		var assembly: Dictionary = assemblies[fitting[0]]
+		var bounds: AABB = assembly.bounds
+		var anchor := Vector3(bounds.get_center().x, bounds.position.y, bounds.get_center().z)
+		var placement := Transform3D(Basis.IDENTITY, fitting[1]) * Transform3D(Basis(Vector3.UP, fitting[2]).scaled(fitting[3]), Vector3.ZERO) * Transform3D(Basis.IDENTITY, -anchor)
+		for original in assembly.meshes:
+			var title := str(original.name)
+			if fitting[0] == "Asset_WalkInDoorModule" and title.begins_with("Handle"):
+				continue
+			var placed := MeshInstance3D.new()
+			placed.mesh = original.mesh
+			placed.transform = placement * original.global_transform
+			add_child(placed)
+			_batch(placed)
+			var physical: AABB = placed.global_transform * placed.get_aabb()
+			if fitting[0] != "Asset_WalkInDoorModule" and physical.position.y < 2.5 and physical.end.y > 0.35 and physical.size.x > 0.2 and physical.size.z > 0.2:
+				solid(physical.get_center(), physical.size)
+			placed.queue_free()
+			source_mesh_count += 1
+		appliance_placements += 1
+	remove_child(source)
+	source.free()
+
+func _batch(instance: MeshInstance3D) -> void:
+	for surface in instance.mesh.get_surface_count():
+		var mat := instance.get_active_material(surface)
+		var cell := Vector2i(floori(instance.global_position.x / 8), floori(instance.global_position.z / 8))
+		var key := "%s_%s" % [mat.get_instance_id() if mat else 0, cell]
+		if not _groups.has(key):
+			var st := SurfaceTool.new()
+			st.begin(Mesh.PRIMITIVE_TRIANGLES)
+			var aged := mat.duplicate() as StandardMaterial3D if mat else StandardMaterial3D.new()
+			if aged:
 				aged.roughness = maxf(aged.roughness, 0.65)
 				aged.cull_mode = BaseMaterial3D.CULL_DISABLED
 				st.set_material(aged)
-				groups[key] = st
-			groups[key].append_from(instance.mesh, surface, instance.global_transform)
-	for key in groups:
-		var combined := MeshInstance3D.new()
-		combined.name = "StaticBatch_%d" % batch_count
-		combined.mesh = groups[key].commit()
-		add_child(combined)
-		batch_count += 1
-	remove_child(imported)
-	imported.free()
+			_groups[key] = st
+		_groups[key].append_from(instance.mesh, surface, instance.global_transform)
 
 func solid(pos: Vector3, size: Vector3, blocks_navigation: bool = true) -> void:
 	var body := StaticBody3D.new()
 	var shape := CollisionShape3D.new()
 	var box := BoxShape3D.new()
-	box.size = size
+	box.size = size.max(Vector3.ONE * 0.015)
 	shape.shape = box
 	body.position = pos
 	body.add_child(shape)
@@ -64,158 +237,191 @@ func solid(pos: Vector3, size: Vector3, blocks_navigation: bool = true) -> void:
 	if blocks_navigation:
 		obstacles.append(AABB(pos - size * 0.5, size))
 
-func _collision() -> void:
-	solid(Vector3(0, -0.15, 0), Vector3(24, 0.3, 18), false)
-	solid(Vector3(-12, 2.8, 0), Vector3(0.25, 5.6, 18))
-	solid(Vector3(12, 2.8, 0), Vector3(0.25, 5.6, 18))
-	solid(Vector3(0, 2.8, -9), Vector3(24, 5.6, 0.25))
-	solid(Vector3(0, 2.8, 9), Vector3(24, 5.6, 0.25))
-	solid(Vector3(0, 5.7, 0), Vector3(24, 0.2, 18), false)
-	solid(Vector3(0, 1.05, -6.6), Vector3(13.5, 2.1, 1.6))
-	for x in [-6.2, 6.2]:
-		for z in [5.8, 2.6, -0.6, -3.8]:
-			solid(Vector3(x, 0.75, z), Vector3(1.65, 1.5, 1.25))
-			# Right-hand booth groups are rotated 180 degrees in the GLB.
-			var table_z: float = z + (0.92 if x > 0 else -0.92)
-			solid(Vector3(x, 0.42, table_z), Vector3(1.35, 0.84, 0.78))
-	# Hollow pit walls, with a lowered central opening and a walkable ramp.
-	solid(Vector3(-3.08, 0.6, 4.4), Vector3(0.34, 1.2, 4.8))
-	solid(Vector3(3.08, 0.6, 4.4), Vector3(0.34, 1.2, 4.8))
-	solid(Vector3(0, 0.6, 6.64), Vector3(6.5, 1.2, 0.32))
-	solid(Vector3(-1.98, 0.6, 2.16), Vector3(2.6, 1.2, 0.32))
-	solid(Vector3(1.98, 0.6, 2.16), Vector3(2.6, 1.2, 0.32))
-	solid(Vector3(0, 0.28, 4.4), Vector3(5.8, 0.56, 4.5), false)
-	var ramp_body := StaticBody3D.new()
-	var ramp_shape := CollisionShape3D.new()
-	var ramp := ConvexPolygonShape3D.new()
-	ramp.points = PackedVector3Array([Vector3(-0.68, 0, 0.7), Vector3(0.68, 0, 0.7), Vector3(-0.68, 0, 2.8), Vector3(0.68, 0, 2.8), Vector3(-0.68, 1.24, 2.3), Vector3(0.68, 1.24, 2.3), Vector3(-0.68, 0.56, 2.8), Vector3(0.68, 0.56, 2.8)])
-	ramp_shape.shape = ramp
-	ramp_body.add_child(ramp_shape)
-	add_child(ramp_body)
-	var ramp_surface := SurfaceTool.new()
-	ramp_surface.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for index in [0, 4, 1, 1, 4, 5, 4, 6, 5, 5, 6, 7]:
-		ramp_surface.add_vertex(ramp.points[index])
-	ramp_surface.generate_normals()
-	var ramp_mesh := MeshInstance3D.new()
-	ramp_mesh.mesh = ramp_surface.commit()
-	ramp_mesh.material_override = Geo.material(Color("5c5143"))
-	add_child(ramp_mesh)
+func _wall(pos: Vector3, size: Vector3, mat: Material) -> void:
+	Geo.box(self, pos, size, mat)
+	solid(pos, size)
+
+func _shell_and_passages() -> void:
+	var purple := Geo.material(Color("382b40"))
+	var tile := Geo.material(Color("6f91a7"))
+	var freezer := Geo.material(Color("a7b5b9"))
+	_wall(Vector3(36, 2.7, 0), Vector3(0.2, 5.4, 50), purple)
+	_wall(Vector3(0, 2.7, -25), Vector3(72, 5.4, 0.2), purple)
+	_wall(Vector3(0, 2.7, 25), Vector3(72, 5.4, 0.2), purple)
+	# Front entrance is on the west wall, matching EntrancePad in the export.
+	_wall(Vector3(-36, 2.7, -13.4), Vector3(0.2, 5.4, 23.2), purple)
+	_wall(Vector3(-36, 2.7, 13.4), Vector3(0.2, 5.4, 23.2), purple)
+	_wall(Vector3(-36, 4.35, 0), Vector3(0.2, 2.1, 3.6), purple)
+	Geo.box(self, Vector3(0, 5.45, 0), Vector3(72, 0.1, 50), Geo.material(Color("45444b")))
+	solid(Vector3(0, -0.1, 0), Vector3(72, 0.2, 50), false)
+	# Staff opening to the left of the counter, 3 metres wide.
+	_wall(Vector3(-15.75, 1.65, 9), Vector3(4.5, 3.3, 0.18), tile)
+	# An open service window shows the kitchen over the counter.
+	_wall(Vector3(-8, 1.65, 9), Vector3(5, 3.3, 0.18), tile)
+	_wall(Vector3(2.5, 0.55, 9), Vector3(16, 1.1, 0.18), tile)
+	_wall(Vector3(2.5, 3.05, 9), Vector3(16, 0.5, 0.18), tile)
+	_wall(Vector3(22.25, 1.65, 9), Vector3(23.5, 3.3, 0.18), tile)
+	_wall(Vector3(-12, 3.1, 9), Vector3(3, 0.4, 0.18), tile)
+	# Service counter shown across the dining/kitchen boundary in the final plan.
+	var counter := Geo.material(Color("85878b"))
+	_wall(Vector3(2.5, 0.52, 7.8), Vector3(16, 1.04, 1.1), counter)
+	Geo.box(self, Vector3(2.5, 1.08, 7.8), Vector3(16.3, 0.08, 1.3), Geo.material(Color("c3c1b8")))
+	# The export overlapped the bathroom and freezer. The final floor plan
+	# puts cold storage on the right side of the kitchen, with a west entry.
+	_wall(Vector3(19, 1.65, 13.25), Vector3(0.14, 3.3, 2.5), freezer)
+	_wall(Vector3(19, 1.65, 18.75), Vector3(0.14, 3.3, 2.5), freezer)
+	_wall(Vector3(19, 3.1, 16), Vector3(0.14, 0.4, 3), freezer)
+	# This solid return hides the freezer from the customer service window.
+	_wall(Vector3(19, 1.65, 10.5), Vector3(0.14, 3.3, 3), freezer)
+	# The original bathroom vanity blocked its entrance across the room.
+	_wall(Vector3(-23, 0.02, 11.3), Vector3(8.8, 0.04, 5.5), tile)
+	# Front wall and an open door leave a clear entrance into the bathroom.
+	_wall(Vector3(-26.25, 1.55, 14), Vector3(3.5, 3.1, 0.16), tile)
+	_wall(Vector3(-19.75, 1.55, 14), Vector3(3.5, 3.1, 0.16), tile)
+	_wall(Vector3(-23, 2.75, 14), Vector3(3, 0.7, 0.16), tile)
+	var door_mat := Geo.material(Color("c4c7c0"))
+	Geo.box(self, Vector3(-24.42, 1.1, 14.9), Vector3(0.07, 2.1, 1.8), door_mat)
+	_wall(Vector3(-19.3, 0.5, 16.2), Vector3(0.8, 1.0, 2.8), Geo.material(Color("777f84")))
+	for z in [15.4, 16.2, 17.0]:
+		Geo.sphere(self, Vector3(-19.3, 1.04, z), 0.2, Geo.material(Color("d2d3cf")))
+	Geo.box(self, Vector3(-18.95, 1.65, 16.2), Vector3(0.06, 1.0, 2.8), Geo.material(Color("aebcbf"), 0.55))
+	# Imported stall doors were closed across every opening. Show them swung in.
+	for x in [-26.4, -23.7, -21.0]:
+		Geo.box(self, Vector3(x, 1.15, 18.63), Vector3(0.06, 2.1, 1.4), door_mat)
+	# Booth seats run behind the row of tables, beside the plan's half wall.
+	var divider := Geo.material(Color("59626a"))
+	_wall(Vector3(-17.25, 0.55, 4.7), Vector3(7.5, 1.1, 0.18), divider)
+	_wall(Vector3(4.25, 0.55, 4.7), Vector3(29.5, 1.1, 0.18), divider)
+	# The new pit has a low padded rim and an open central walk-out.
+	var vinyl := Geo.material(Color(0.7, 0.16, 0.13, 0.22))
+	vinyl.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	vinyl.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_wall(Vector3(0, 0.23, -20.5), Vector3(31, 0.46, 0.3), vinyl)
+	_wall(Vector3(-15.5, 0.23, -13.25), Vector3(0.3, 0.46, 14.5), vinyl)
+	_wall(Vector3(15.5, 0.23, -13.25), Vector3(0.3, 0.46, 14.5), vinyl)
+	_wall(Vector3(-4.5, 0.23, -6), Vector3(22, 0.46, 0.3), vinyl)
+	_wall(Vector3(12.5, 0.23, -6), Vector3(6, 0.46, 0.3), vinyl)
+	# Bridge the small joins between the imported upper play modules.
+	solid(Vector3(0, 2.69, -18.05), Vector3(27.2, 0.08, 1.6), false)
+	solid(Vector3(12.5, 2.9, -19.15), Vector3(2.2, 0.08, 1.6), false)
+	Geo.box(self, Vector3(12.5, 2.9, -19.15), Vector3(2.2, 0.08, 1.6), Geo.material(Color("375c81")))
+	# A shallow entry ramp reaches the first imported climbing platform.
+	var entry_center := Vector3(14.5, 0.55, -7.22)
+	var entry_size := Vector3(1.9, 0.14, 2.0)
+	var entry_angle := atan2(0.94, 1.9)
+	var entry_mesh := Geo.box(self, entry_center, entry_size, Geo.material(Color("375c81")))
+	entry_mesh.rotation.x = entry_angle
+	var entry_body := StaticBody3D.new()
+	entry_body.position = entry_center
+	entry_body.rotation.x = entry_angle
+	var entry_shape := CollisionShape3D.new()
+	var entry_box := BoxShape3D.new()
+	entry_box.size = entry_size
+	entry_shape.shape = entry_box
+	entry_body.add_child(entry_shape)
+	add_child(entry_body)
+	# Maintenance crate inside the freezer supports the third fuse.
+	_wall(Vector3(23.5, 0.46, 16), Vector3(1.2, 0.84, 0.9), Geo.material(Color("665d47")))
 
 func _ball_pit() -> void:
-	# 720 balls in one draw call; no hundreds of rigid bodies or script updates.
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 7319
+	var source := PLAY_PLACE.instantiate()
+	var source_ball := source.find_child("Ball_0000", true, false) as MeshInstance3D
+	var mesh := source_ball.mesh.duplicate() as Mesh
+	var material := Geo.material(Color.WHITE)
+	material.vertex_color_use_as_albedo = true
+	mesh.surface_set_material(0, material)
 	var balls := MultiMesh.new()
 	balls.transform_format = MultiMesh.TRANSFORM_3D
 	balls.use_colors = true
-	# Reuse an actual Blender ball mesh, discarding the export's display layout.
-	var ball_export: Node3D = preload("res://Blender models/ballpit.glb").instantiate()
-	var source_ball := ball_export.find_child("Ball_000", true, false) as MeshInstance3D
-	var sphere: Mesh = source_ball.mesh.duplicate()
-	var mat := Geo.material(Color.WHITE)
-	mat.vertex_color_use_as_albedo = true
-	sphere.surface_set_material(0, mat)
-	balls.mesh = sphere
-	ball_export.free()
-	balls.instance_count = 720
-	var colors := [Color("b64c3e"), Color("bba14e"), Color("336d8a"), Color("437f67"), Color("9b637f")]
-	for i in balls.instance_count:
-		var column := i % 30
-		var row := i / 30
-		var pos := Vector3(-2.76 + column * 0.19 + rng.randf_range(-0.04, 0.04), rng.randf_range(0.57, 0.76), 2.38 + row * 0.174 + rng.randf_range(-0.04, 0.04))
-		balls.set_instance_transform(i, Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * 0.61), pos))
-		balls.set_instance_color(i, colors[rng.randi_range(0, 4)])
+	balls.mesh = mesh
+	balls.instance_count = ball_count
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7319
+	var colors := [Color("b64c3e"), Color("c7aa3f"), Color("3364a0")]
+	for i in ball_count:
+		var layer := i / 1800
+		var cell := i % 1800
+		var pos := Vector3(-14.85 + (cell % 60) * 0.5 + layer * 0.24, 0.18 + layer * 0.24 + rng.randf_range(-0.02, 0.02), -20.1 + (cell / 60) * 0.46 + layer * 0.22)
+		pos.x += rng.randf_range(-0.045, 0.045)
+		pos.z += rng.randf_range(-0.045, 0.045)
+		ball_origins.append(pos)
+		ball_positions.append(pos)
+		balls.set_instance_transform(i, Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * 0.97), pos))
+		balls.set_instance_color(i, colors[rng.randi_range(0, 2)])
 	var instance := MultiMeshInstance3D.new()
+	instance.name = "BlenderPlayPlaceBalls"
 	instance.multimesh = balls
 	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(instance)
-
-func _play_tubes() -> void:
-	var source: Node3D = preload("res://Blender models/tubes.glb").instantiate()
-	# Overhead, wall-mounted play tubes leave the two side aisles navigable.
-	var placements := {
-		"01_Straight_Crawl_Tube": Vector3(-10.6, 3.65, 3.0),
-		"02_90_Degree_Corner_Tube": Vector3(-10.6, 3.65, -2.0),
-		"T_Main": Vector3(10.4, 3.65, 2.5),
-		"T_Branch": Vector3(10.4, 3.65, 2.5),
-		"T_Center_Collar": Vector3(10.4, 3.65, 2.5)
-	}
-	for node_name in placements:
-		var original := source.find_child(node_name, true, false) as MeshInstance3D
-		if original == null:
-			continue
-		var instance := MeshInstance3D.new()
-		instance.mesh = original.mesh
-		instance.position = placements[node_name]
-		instance.scale = Vector3.ONE * 0.58
-		instance.rotation.y = PI / 2
-		add_child(instance)
+	ball_instances = balls
 	source.free()
 
-func _decorate() -> void:
-	var dark := Geo.material(Color("182125"), 0.4)
-	var rust := Geo.material(Color("724435"))
-	var cream := Geo.material(Color("b5b3a0"))
-	Geo.label(self, "H A P P Y   B I R T H D A Y", Vector3(0, 4.75, -8.82), 62, Color("b5a684"))
-	Geo.label(self, "RONALD'S  /  FAMILY DINER", Vector3(0, 4.04, -8.81), 26, Color("6c8882"))
-	Geo.label(self, "PLAY NICE.", Vector3(-4.5, 4, -8.8), 25, Color("bb8c74"))
-	Geo.label(self, "STAY FOREVER.", Vector3(4.5, 4, -8.8), 25, Color("bb8c74"))
-	var exit_sign := Geo.label(self, "E X I T", Vector3(0, 3.48, 8.76), 48, Color("74bc9a"))
-	exit_sign.rotation.y = PI
-	exit_door = Node3D.new()
-	exit_door.position = Vector3(-1.7, 0, 8.82)
-	add_child(exit_door)
-	Geo.box(exit_door, Vector3(1.7, 1.5, 0), Vector3(3.4, 3, 0.1), dark)
-	Geo.box(exit_door, Vector3(1.7, 1.4, -0.12), Vector3(2.9, 0.08, 0.06), rust)
-	exit_light = _light(Vector3(0, 3, 7.7), Color("79ba98"), 1.0, 5.0)
-	_light(Vector3(0, 4.3, 4.4), Color("698399"), 0.8, 8.5)
-	flicker_light = _light(Vector3(-7.8, 3.8, -3), Color("bdaa80"), 0.7, 7.0)
-	_light(Vector3(8.6, 3.8, 2), Color("8a5951"), 0.7, 6.5)
-	for x in [-8, 0, 8]:
-		for z in [-4, 3]:
-			Geo.box(self, Vector3(x, 5.55, z), Vector3(2.2, 0.13, 0.5), dark)
-	# A few sparse details give the exported diner a lived-in silhouette.
-	for i in 14:
-		var x := -10.5 + i * 1.6
-		var flag := Geo.box(self, Vector3(x, 3.9 + sin(i * 0.45) * 0.22, 1.0), Vector3(0.4, 0.46, 0.025), rust if i % 2 == 0 else cream)
-		flag.rotation.z = sin(i) * 0.2
-	var note := Geo.label(self, "CLOSING CHECKLIST\n\n3 fuses → breaker → front door\n\nKeep the light on him.", Vector3(-3.7, 1.65, -5.76), 20, Color("d0c3a3"))
-	note.pixel_size = 0.004
-	_exterior()
+func _animate_balls(delta: float) -> void:
+	if ball_instances == null:
+		return
+	var player := get_parent().get("player") as CharacterBody3D
+	if player == null:
+		return
+	var p := player.global_position
+	var stirring := p.x > -15.2 and p.x < 15.2 and p.z > -20.5 and p.z < -6.0 and p.y < 1.1 and Vector2(player.velocity.x, player.velocity.z).length() > 0.2
+	if stirring:
+		var col := clampi(roundi((p.x + 14.85) / 0.5), 0, 59)
+		var row := clampi(roundi((p.z + 20.1) / 0.46), 0, 29)
+		for layer in 2:
+			for z in range(maxi(0, row - 4), mini(29, row + 4) + 1):
+				for x in range(maxi(0, col - 4), mini(59, col + 4) + 1):
+					ball_active[layer * 1800 + z * 60 + x] = true
+	var settled: Array[int] = []
+	for index in ball_active:
+		var i: int = index
+		var origin := ball_origins[i]
+		var delta_xz := Vector2(origin.x - p.x, origin.z - p.z)
+		var distance := delta_xz.length()
+		var target := origin
+		if stirring and distance < 1.45:
+			var push := delta_xz.normalized() * (1.45 - distance) * 0.2
+			target += Vector3(push.x, sin(Time.get_ticks_msec() * 0.012 + i) * 0.08, push.y)
+		var next_pos := ball_positions[i].lerp(target, minf(1.0, delta * 9.0))
+		ball_positions[i] = next_pos
+		ball_instances.set_instance_transform(i, Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * 0.97), next_pos))
+		if not stirring or distance >= 1.45:
+			if next_pos.distance_to(origin) < 0.01:
+				settled.append(i)
+	for i in settled:
+		ball_active.erase(i)
 
-func _exterior() -> void:
-	# This is the live diner facade seen from the home camera, not a flat menu image.
+func _decorate() -> void:
+	var dark := Geo.material(Color("18262a"), 0.3)
+	exit_door = Node3D.new()
+	exit_door.position = Vector3(-35.88, 0, -1.7)
+	add_child(exit_door)
+	Geo.box(exit_door, Vector3(0, 1.6, 1.7), Vector3(0.13, 3.2, 3.4), dark)
+	Geo.box(exit_door, Vector3(0.1, 1.4, 1.7), Vector3(0.08, 0.08, 2.9), Geo.material(Color("bf9b50"), 0.6))
+	solid(Vector3(-35.9, 1.6, 0), Vector3(0.15, 3.2, 3.4))
+	exit_light = _light(Vector3(-33.8, 3, 0), Color("79ba98"), 1.5, 8)
+	flicker_light = _light(Vector3(-10, 3.9, 1), Color("c7a77d"), 1.1, 13)
+	_light(Vector3(10, 4, -12), Color("6c9db9"), 1.5, 15)
+	_light(Vector3(-8, 4, -16), Color("b67d63"), 1.0, 12)
+	_light(Vector3(13, 4, 2), Color("d7aa70"), 1.1, 13)
+	_light(Vector3(23.5, 2.8, 16), Color("90c5d9"), 1.5, 8)
+	_light(Vector3(-23, 3.8, 6), Color("819fa2"), 0.85, 10)
+	_light(Vector3(-23, 3.4, 18), Color("94b5a3"), 1.1, 9)
+	for x in [-9, 8, 26]:
+		_light(Vector3(x, 4.2, 16), Color("abbdaf"), 1.05, 12)
+	for x in [-12, 0, 12, 26]:
+		for z in [-2, 16]:
+			powered_fixtures.append(Geo.box(self, Vector3(x, 5.34, z), Vector3(2.8, 0.12, 0.6), Geo.material(Color("777a78"))))
+	# A readable entrance facade for the home camera, aligned with the new map.
 	var brick := Geo.material(Color("743c35"))
-	var trim := Geo.material(Color("d4a344"), 0.18)
-	var glass := Geo.material(Color("182b30"), 0.28)
-	var pavement := Geo.material(Color("303334"))
-	Geo.box(self, Vector3(0, -0.09, 15.6), Vector3(25, 0.18, 13.3), pavement)
-	Geo.box(self, Vector3(0, 4.58, 9.24), Vector3(23.7, 1.55, 0.2), brick)
-	Geo.box(self, Vector3(0, 3.81, 9.37), Vector3(24, 0.12, 0.34), trim)
-	Geo.box(self, Vector3(0, 5.37, 9.33), Vector3(24, 0.16, 0.33), trim)
-	for x in [-8.4, 8.4]:
-		Geo.box(self, Vector3(x, 2.18, 9.27), Vector3(5.4, 2.75, 0.12), trim)
-		Geo.box(self, Vector3(x, 2.18, 9.35), Vector3(5.1, 2.46, 0.07), glass)
-		Geo.box(self, Vector3(x, 2.18, 9.44), Vector3(0.12, 2.46, 0.09), trim)
-		Geo.box(self, Vector3(x, 2.18, 9.45), Vector3(5.1, 0.12, 0.09), trim)
-		Geo.box(self, Vector3(x, 3.51, 9.48), Vector3(5.7, 0.27, 0.65), brick)
-	Geo.box(self, Vector3(0, 3.28, 9.48), Vector3(4.15, 0.17, 0.58), trim)
-	Geo.box(self, Vector3(0, 2.81, 9.42), Vector3(4.2, 0.12, 0.25), brick)
-	Geo.box(self, Vector3(-2.18, 1.52, 9.43), Vector3(0.19, 3.17, 0.23), trim)
-	Geo.box(self, Vector3(2.18, 1.52, 9.43), Vector3(0.19, 3.17, 0.23), trim)
-	Geo.box(self, Vector3(-1.05, 1.52, 9.53), Vector3(1.93, 2.83, 0.08), glass)
-	Geo.box(self, Vector3(1.05, 1.52, 9.53), Vector3(1.93, 2.83, 0.08), glass)
-	Geo.box(self, Vector3(0, 1.52, 9.62), Vector3(0.12, 2.92, 0.15), trim)
-	Geo.box(self, Vector3(-0.17, 1.48, 9.64), Vector3(0.13, 0.6, 0.17), trim)
-	Geo.box(self, Vector3(0.17, 1.48, 9.64), Vector3(0.13, 0.6, 0.17), trim)
-	Geo.label(self, "R O N A L D ' S", Vector3(0, 4.63, 9.39), 72, Color("f7e6aa"))
-	Geo.label(self, "F A M I L Y   D I N E R", Vector3(0, 4.10, 9.46), 25, Color("efd7a3"))
-	Geo.label(self, "OPEN LATE     •     SINCE 1987", Vector3(0, 3.48, 9.89), 23, Color("f4dea3"))
-	for x in [-10.6, -8.4, -6.2, -4.0, 4.0, 6.2, 8.4, 10.6]:
-		Geo.sphere(self, Vector3(x, 3.6, 9.63), 0.066, Geo.material(Color("e5b959"), 0, 1.6))
-	_light(Vector3(0, 4.6, 12.5), Color("e6ac65"), 1.1, 15.0)
-	_light(Vector3(-8, 3.4, 11.8), Color("d4a170"), 0.55, 8.0)
+	var gold := Geo.material(Color("c99b43"), 0.2)
+	Geo.box(self, Vector3(-40, -0.09, 0), Vector3(8, 0.18, 24), Geo.material(Color("303334")))
+	Geo.box(self, Vector3(-36.2, 4.35, 0), Vector3(0.2, 1.6, 23), brick)
+	Geo.box(self, Vector3(-36.35, 3.52, 0), Vector3(0.5, 0.15, 24), gold)
+	for z in [-8, 8]:
+		Geo.box(self, Vector3(-36.2, 2, z), Vector3(0.12, 2.4, 6), gold)
+		Geo.box(self, Vector3(-36.3, 2, z), Vector3(0.08, 2.15, 5.7), dark)
+		Geo.box(self, Vector3(-36.4, 2, z), Vector3(0.1, 2.15, 0.12), gold)
+	_light(Vector3(-40, 4, 0), Color("e6ac65"), 2.8, 18)
 
 func _light(pos: Vector3, color: Color, energy: float, radius: float) -> OmniLight3D:
 	var light := OmniLight3D.new()
@@ -224,29 +430,47 @@ func _light(pos: Vector3, color: Color, energy: float, radius: float) -> OmniLig
 	light.light_energy = energy
 	light.omni_range = radius
 	light.shadow_enabled = false
+	light.visible = false
 	add_child(light)
+	powered_lights.append(light)
 	return light
 
+func set_powered(enabled: bool) -> void:
+	for light in powered_lights:
+		light.visible = enabled
+	for fixture in powered_fixtures:
+		fixture.material_override = Geo.material(Color("d3d0bd"), 0, 0.7) if enabled else Geo.material(Color("777a78"))
+
 func _navigation() -> void:
-	nav.region = Rect2i(-23, -17, 47, 35)
+	nav.region = Rect2i(-71, -49, 143, 99)
 	nav.cell_size = Vector2(0.5, 0.5)
 	nav.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES
 	nav.update()
-	for x in range(-23, 24):
-		for z in range(-17, 18):
-			var point := Vector3(x * 0.5, 0.7, z * 0.5)
-			for obstacle in obstacles:
-				if obstacle.grow(0.36).has_point(point):
-					nav.set_point_solid(Vector2i(x, z))
-					break
-	# Enemy stays out of the starting pit; it can route around both sides.
-	for x in range(-6, 7):
-		for z in range(4, 14):
-			nav.set_point_solid(Vector2i(x, z))
+	for obstacle in obstacles:
+		# Project anything intersecting the creature's body onto the floor grid.
+		if obstacle.end.y < 0.2 or obstacle.position.y > 2.25:
+			continue
+		var bounds := obstacle.grow(0.38)
+		for x in range(floori(bounds.position.x * 2), ceili(bounds.end.x * 2) + 1):
+			for z in range(floori(bounds.position.z * 2), ceili(bounds.end.z * 2) + 1):
+				var cell := Vector2i(x, z)
+				if nav.is_in_boundsv(cell):
+					nav.set_point_solid(cell)
+
+func _nearest_open(cell: Vector2i) -> Vector2i:
+	if nav.is_in_boundsv(cell) and not nav.is_point_solid(cell):
+		return cell
+	for radius in range(1, 5):
+		for x in range(-radius, radius + 1):
+			for z in range(-radius, radius + 1):
+				var candidate := cell + Vector2i(x, z)
+				if nav.is_in_boundsv(candidate) and not nav.is_point_solid(candidate):
+					return candidate
+	return cell
 
 func route(from: Vector3, to: Vector3) -> PackedVector2Array:
-	var a := Vector2i(roundi(from.x * 2), roundi(from.z * 2))
-	var b := Vector2i(roundi(to.x * 2), roundi(to.z * 2))
+	var a := _nearest_open(Vector2i(roundi(from.x * 2), roundi(from.z * 2)))
+	var b := _nearest_open(Vector2i(roundi(to.x * 2), roundi(to.z * 2)))
 	if not nav.is_in_boundsv(a) or not nav.is_in_boundsv(b) or nav.is_point_solid(a) or nav.is_point_solid(b):
 		return PackedVector2Array()
 	return nav.get_point_path(a, b)

@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://cvivc2ehw7heg"
-path="res://.godot/imported/ballpit.glb-315849c3466551c3a16a58c2591d3601.scn"
+uid="uid://b4llj12bp30kv"
+path="res://.godot/imported/appliances.glb-323acb258773889a5d881fa2ab45932b.scn"
 
 [deps]
 
-source_file="res://Blender models/ballpit.glb"
-dest_files=["res://.godot/imported/ballpit.glb-315849c3466551c3a16a58c2591d3601.scn"]
+source_file="res://Blender models/appliances.glb"
+dest_files=["res://.godot/imported/appliances.glb-323acb258773889a5d881fa2ab45932b.scn"]
 
 [params]
 

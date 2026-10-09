@@ -37,4 +37,6 @@ write("sting", 2.5, lambda t, d: (tone(t, 47 + t * 6) * 0.3 + tone(t, 69) * 0.12
       + random.uniform(-1, 1) * 0.025) * math.sin(math.pi * t / d) * math.exp(-t * 0.8))
 write("power", 1.5, lambda t, d: (tone(t, 60) * 0.2 + tone(t, 120) * 0.1
       + random.uniform(-1, 1) * 0.09 * math.exp(-t * 10)) * math.sin(math.pi * t / d))
-print("Generated 7 original PCM audio clips in", DEST)
+write("land", 0.32, lambda t, d: (tone(t, 76) * 0.34 + tone(t, 142) * 0.12
+      + random.uniform(-1, 1) * 0.16) * math.exp(-t * 21))
+print("Generated 8 original PCM audio clips in", DEST)

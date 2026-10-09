@@ -147,7 +147,10 @@ func _button(parent: Node, words: String, callback: Callable) -> Button:
 	button.add_theme_stylebox_override("hover", hovered)
 	button.add_theme_stylebox_override("pressed", hovered)
 	button.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-	button.pressed.connect(callback)
+	button.pressed.connect(func():
+		game.sound("pickup")
+		callback.call()
+	)
 	parent.add_child(button)
 	return button
 
@@ -180,6 +183,7 @@ func _options_menu() -> void:
 	volume_slider.step = 0.05
 	volume_slider.value = 0.8
 	volume_slider.value_changed.connect(func(value: float): AudioServer.set_bus_volume_db(0, linear_to_db(maxf(value, 0.001))))
+	volume_slider.drag_started.connect(func(): game.sound("pickup"))
 	column.add_child(volume_slider)
 	var sensitivity := Label.new()
 	sensitivity.text = "MOUSE SENSITIVITY"
@@ -190,14 +194,21 @@ func _options_menu() -> void:
 	slider.step = 0.0001
 	slider.value = game.player.sensitivity
 	slider.value_changed.connect(func(value: float): game.player.sensitivity = value)
+	slider.drag_started.connect(func(): game.sound("pickup"))
 	column.add_child(slider)
 	var motion := CheckButton.new()
 	motion.text = "Reduce camera motion"
-	motion.toggled.connect(func(enabled: bool): game.player.reduce_motion = enabled)
+	motion.toggled.connect(func(enabled: bool):
+		game.sound("pickup")
+		game.player.reduce_motion = enabled
+	)
 	column.add_child(motion)
 	quality_button = CheckButton.new()
 	quality_button.text = "Low graphics"
-	quality_button.toggled.connect(func(enabled: bool): game.set_quality(enabled))
+	quality_button.toggled.connect(func(enabled: bool):
+		game.sound("pickup")
+		game.set_quality(enabled)
+	)
 	column.add_child(quality_button)
 	_button(column, "BACK", func(): show_menu("home" if menu_mode == "options_home" else "pause"))
 

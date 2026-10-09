@@ -29,11 +29,12 @@ func run() -> void:
 	await create_timer(3.0).timeout
 	game.pause_game(false)
 	await capture("03-flashlight")
-	game.player.position = Vector3(0, 0, -0.5)
+	game.player.position = Vector3(8, 0.12, -4)
+	game.player.rotation = Vector3(0, PI, 0)
 	game.player.camera.rotation.x = -0.08
 	game.player.pitch = -0.08
 	game.stalker.awaken()
-	game.stalker.position = Vector3(0, 0, -4.6)
+	game.stalker.position = Vector3(8, 0.12, 1)
 	game.show_performance = true
 	await create_timer(1).timeout
 	await capture("04-diner")
@@ -47,6 +48,30 @@ func run() -> void:
 	game.set_quality(true)
 	await create_timer(0.5).timeout
 	await capture("05-low")
+	game.stalker.active = false
+	game.set_quality(false)
+	game.show_performance = false
+	var views := [
+		["08-play-place", Vector3(8, 0.12, -3), Vector3(0, 2, -16)],
+		["09-kitchen", Vector3(-2, 0.12, 17), Vector3(13, 1.8, 19)],
+		["10-freezer", Vector3(21, 0.12, 16), Vector3(24, 1.3, 18)],
+		["11-restrooms", Vector3(-23, 0.12, 12), Vector3(-23, 1.2, 18)],
+		["12-dining", Vector3(-10, 0.12, 0), Vector3(9, 1.4, 3)],
+		["13-beverages", Vector3(20, 0.12, 5), Vector3(26, 1.4, 7)],
+		["14-service-counter", Vector3(-11, 0.12, 5.5), Vector3(2.5, 1.4, 8)],
+		["15-ball-pit-down", Vector3(0, 0.12, -14), Vector3(0, 0.15, -14.8)],
+		["16-kitchen-from-tables", Vector3(5, 0.12, -2.5), Vector3(5, 1.5, 13)],
+		["17-play-glass-back", Vector3(0, 0.12, -14), Vector3(0, 1.5, -22)],
+		["18-play-glass-left", Vector3(-15, 0.12, -14), Vector3(-21, 1.5, -14)],
+		["19-bathroom-entrance", Vector3(-23, 0.12, 11), Vector3(-23, 1.2, 17)]
+	]
+	for view in views:
+		game.player.position = view[1]
+		game.player.velocity = Vector3.ZERO
+		game.player.camera.look_at(view[2])
+		game.player.pitch = game.player.camera.rotation.x
+		await create_timer(0.2).timeout
+		await capture(view[0])
 	game.pause_game(true)
 	await capture("06-pause")
 	game.hud.show_menu("options_pause")

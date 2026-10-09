@@ -39,7 +39,7 @@ func _ready() -> void:
 	add_child(world)
 	player = CharacterBody3D.new()
 	player.set_script(PlayerScript)
-	player.position = Vector3(0, 0.56, 4.7)
+	player.position = world.SPAWN
 	player.process_mode = Node.PROCESS_MODE_PAUSABLE
 	add_child(player)
 	stalker = Node3D.new()
@@ -60,10 +60,15 @@ func _ready() -> void:
 	_audio()
 	player.flashlight_changed.connect(func(_enabled: bool): sound("click"))
 	player.step.connect(func(): sound("step", randf_range(0.86, 1.13)))
+	player.landed.connect(func(impact_speed: float):
+		var landing := sounds["land"] as AudioStreamPlayer
+		landing.volume_db = linear_to_db(clampf(impact_speed / 9.0, 0.35, 1.0))
+		sound("land", randf_range(0.94, 1.06))
+	)
 	_show_home_view()
 	hud.show_menu("home")
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	print("RONALD'S: %d source meshes -> %d static batches; 720 balls -> 1 MultiMesh." % [world.source_mesh_count, world.batch_count])
+	print("RONALD'S: %d source meshes -> %d static batches; %d Blender balls -> 1 MultiMesh." % [world.source_mesh_count, world.batch_count, world.ball_count])
 
 func _bind_inputs() -> void:
 	var bindings := {"move_forward": KEY_W, "move_back": KEY_S, "move_left": KEY_A, "move_right": KEY_D, "sprint": KEY_SHIFT, "jump": KEY_SPACE, "flashlight": KEY_F, "interact": KEY_E, "reload_cell": KEY_R}
@@ -80,12 +85,12 @@ func _environment() -> void:
 	environment.background_color = Color("030609")
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	environment.ambient_light_color = Color("788795")
-	environment.ambient_light_energy = 0.19
+	environment.ambient_light_energy = 0.3
 	environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	environment.fog_enabled = true
 	environment.fog_light_color = Color("111b20")
 	environment.fog_light_energy = 0.2
-	environment.fog_density = 0.019
+	environment.fog_density = 0.008
 	var node := WorldEnvironment.new()
 	node.environment = environment
 	add_child(node)
@@ -93,7 +98,7 @@ func _environment() -> void:
 func _items() -> void:
 	var brass := Geo.material(Color("bea56e"), 0.6)
 	var ceramic := Geo.material(Color("cac9b5"))
-	for pos in [Vector3(-6.2, 0.95, -1.52), Vector3(6.2, 0.95, 3.52), Vector3(9.8, 0.95, -6.0)]:
+	for pos in world.FUSE_POSITIONS:
 		var item := Node3D.new()
 		item.position = pos
 		add_child(item)
@@ -104,17 +109,14 @@ func _items() -> void:
 			cap.rotation.z = PI / 2
 		world._light(pos + Vector3(0, 0.1, 0), Color("82b8a5"), 0.35, 1.25)
 		items.append({"node": item, "kind": "fuse", "label": "E  /  Take emergency fuse", "taken": false})
-	# Third fuse sits on an added maintenance crate in the open side aisle.
-	Geo.box(world, Vector3(9.8, 0.4, -6), Vector3(1.0, 0.8, 0.8), Geo.material(Color("534938")))
-	world.solid(Vector3(9.8, 0.4, -6), Vector3(1, 0.8, 0.8))
-	for pos in [Vector3(-6.2, 0.98, 4.88), Vector3(6.2, 0.98, -2.88)]:
+	for pos in world.CELL_POSITIONS:
 		var cell := Node3D.new()
 		cell.position = pos
 		add_child(cell)
 		Geo.box(cell, Vector3.ZERO, Vector3(0.18, 0.1, 0.12), Geo.material(Color("899d7b"), 0.3, 0.15))
 		items.append({"node": cell, "kind": "cell", "label": "E  /  Take spare battery", "taken": false})
 	var breaker := Node3D.new()
-	breaker.position = Vector3(11.65, 1.6, -5.6)
+	breaker.position = world.BREAKER_POSITION
 	breaker.rotation.y = -PI / 2
 	add_child(breaker)
 	Geo.box(breaker, Vector3.ZERO, Vector3(0.75, 0.95, 0.18), Geo.material(Color("3e514f"), 0.5))
@@ -123,24 +125,21 @@ func _items() -> void:
 	Geo.label(breaker, "EMERGENCY\nPOWER", Vector3(0, 0.67, 0.13), 20, Color("b9c4b8"))
 	items.append({"node": breaker, "kind": "breaker", "label": "E  /  Restore emergency power", "taken": false})
 	var exit_marker := Node3D.new()
-	exit_marker.position = Vector3(0, 1.5, 8.6)
+	exit_marker.position = world.EXIT_POSITION
 	add_child(exit_marker)
 	items.append({"node": exit_marker, "kind": "exit", "label": "E  /  Open front door", "taken": false})
-	# Added crate must be included in the navigation data.
-	world._navigation()
 
 func _audio() -> void:
 	AudioServer.set_bus_volume_db(0, linear_to_db(0.8))
-	for key in ["click", "step", "pickup", "breath", "sting", "power"]:
+	for key in ["click", "step", "land", "pickup", "breath", "sting", "power"]:
 		var audio := AudioStreamPlayer.new()
 		audio.stream = load("res://audio/%s.wav" % key)
 		audio.process_mode = Node.PROCESS_MODE_PAUSABLE
 		add_child(audio)
 		sounds[key] = audio
 	ambient = AudioStreamPlayer.new()
-	var stream := load("res://audio/room.wav") as AudioStreamWAV
-	stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
-	stream.loop_end = int(stream.get_length() * stream.mix_rate)
+	var stream := load("res://audio/background soundtrack/mcdonald_3min_slow_normal_breathing_more_pitch_variance.mp3") as AudioStreamMP3
+	stream.loop = true
 	ambient.stream = stream
 	ambient.volume_db = -9
 	ambient.process_mode = Node.PROCESS_MODE_PAUSABLE
@@ -160,8 +159,8 @@ func say(words: String, duration: float = 4.0) -> void:
 
 func _show_home_view() -> void:
 	player.control_enabled = false
-	player.position = Vector3(0, 0, 16.5)
-	player.rotation = Vector3.ZERO
+	player.position = Vector3(-45, 0, 0)
+	player.rotation = Vector3(0, -PI / 2, 0)
 	player.camera.position = Vector3(0, 2.7, 0)
 	player.camera.rotation = Vector3.ZERO
 	player.hand.hide()
@@ -174,7 +173,8 @@ func start_game() -> void:
 	phase = "intro"
 	intro_time = 0.0
 	intro_clicked = false
-	player.position = Vector3(0, 0.56, 4.7)
+	player.position = world.SPAWN
+	player.rotation = Vector3(0, PI, 0)
 	player.velocity = Vector3.ZERO
 	player.camera.position = Vector3(0, 0.25, 0)
 	player.camera.rotation_degrees = Vector3(-20, 0, -12)
@@ -213,9 +213,10 @@ func _process(delta: float) -> void:
 			_find_interaction()
 		var distance: float = player.global_position.distance_to(stalker.global_position)
 		hud.lens_material.set_shader_parameter("danger", clampf(1.0 - distance / 5.0, 0, 1) if stalker.active else 0.0)
-		world.flicker_light.light_energy = 0.65 + sin(elapsed * 1.8) * 0.06
+		if power_on:
+			world.flicker_light.light_energy = 1.05 + sin(elapsed * 1.8) * 0.06
 		if player.global_position.y < -5:
-			player.position = Vector3(0, 0.56, 4.7)
+			player.position = world.SPAWN
 
 func finish_intro() -> void:
 	phase = "play"
@@ -226,7 +227,7 @@ func finish_intro() -> void:
 func _find_interaction() -> void:
 	current_item = -1
 	prompt = ""
-	var best := 2.5
+	var best := 3.5
 	for i in items.size():
 		var item := items[i]
 		if item.taken:
@@ -258,8 +259,8 @@ func interact() -> void:
 				sound("sting")
 				say("Something moved. Keep your flashlight on it.", 6)
 			elif fuses == 3:
-				objective = "Restore power at the side breaker"
-				say("All three. The breaker is on the right wall, by the counter.", 6)
+				objective = "Restore power in the kitchen"
+				say("All three. The breaker is on the far kitchen wall.", 6)
 			else:
 				say("Two fuses. One more.")
 		"cell":
@@ -270,14 +271,15 @@ func interact() -> void:
 			say("Spare battery collected. Press R to replace the cell.")
 		"breaker":
 			if fuses < 3:
-				say("Three fuses are missing. Check the booths and maintenance crate.", 5)
+				say("Three fuses are missing. Check the booths, kitchen and cold storage.", 5)
 			elif not power_on:
 				power_on = true
 				item.taken = true
 				breaker_lamp.material_override = Geo.material(Color("72b58d"), 0, 2)
 				world.exit_light.light_energy = 2.4
-				stalker.speed = 1.7
-				objective = "Reach the front door behind the pit"
+				world.set_powered(true)
+				stalker.speed = 2.1
+				objective = "Reach the west entrance"
 				sound("power")
 				say("The door has power. He's moving faster. Go.", 5)
 		"exit":

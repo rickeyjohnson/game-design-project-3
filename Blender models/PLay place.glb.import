@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://bhpu3okc7uisr"
-path="res://.godot/imported/textures.glb-b0eee45c9e8a48a063799f8f79ef9ca7.scn"
+uid="uid://cweqw2b2wkx5b"
+path="res://.godot/imported/PLay place.glb-167d9a7093669395b6c76bd8a1552af8.scn"
 
 [deps]
 
-source_file="res://Blender models/textures.glb"
-dest_files=["res://.godot/imported/textures.glb-b0eee45c9e8a48a063799f8f79ef9ca7.scn"]
+source_file="res://Blender models/PLay place.glb"
+dest_files=["res://.godot/imported/PLay place.glb-167d9a7093669395b6c76bd8a1552af8.scn"]
 
 [params]
 

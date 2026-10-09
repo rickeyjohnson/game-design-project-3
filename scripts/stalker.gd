@@ -11,7 +11,7 @@ var path_timer := 0.0
 var clock := 0.0
 var frozen := false
 var grace := 4.0
-var speed := 1.25
+var speed := 1.65
 signal caught
 
 func _ready() -> void:
@@ -44,7 +44,7 @@ func _limb(parent: Node3D, pos: Vector3, mat: Material) -> Node3D:
 func awaken() -> void:
 	if active:
 		return
-	position = Vector3(3.5, 0, -4.4)
+	position = world.STALKER_SPAWN
 	active = true
 	visible = true
 	grace = 4.0
@@ -68,7 +68,7 @@ func _physics_process(delta: float) -> void:
 		if path.size() > 1:
 			path.remove_at(0)
 	if not path.is_empty():
-		var waypoint := Vector3(path[0].x, 0, path[0].y)
+		var waypoint := Vector3(path[0].x, 0.12, path[0].y)
 		position = position.move_toward(waypoint, speed * delta)
 		if position.distance_to(waypoint) < 0.08:
 			path.remove_at(0)

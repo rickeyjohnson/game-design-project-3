@@ -2,6 +2,7 @@ extends CharacterBody3D
 const Geo = preload("res://scripts/geometry.gd")
 signal flashlight_changed(enabled: bool)
 signal step
+signal landed(impact_speed: float)
 
 const WALK_SPEED := 2.5
 const RUN_SPEED := 4.2
@@ -34,16 +35,16 @@ func _ready() -> void:
 	var collider := CollisionShape3D.new()
 	var capsule := CapsuleShape3D.new()
 	capsule.radius = 0.24
-	capsule.height = 1.65
+	capsule.height = 1.12
 	collider.shape = capsule
-	collider.position.y = 0.825
+	collider.position.y = 0.56
 	add_child(collider)
 	camera = Camera3D.new()
 	camera.name = "Camera"
 	camera.position.y = 0.25
 	camera.rotation_degrees = Vector3(-20, 0, -12)
 	camera.near = 0.04
-	camera.far = 45
+	camera.far = 85
 	camera.fov = 76
 	camera.current = true
 	add_child(camera)
@@ -118,7 +119,7 @@ func _opening_animation() -> void:
 	var library := AnimationLibrary.new()
 	var wake := Animation.new()
 	wake.length = 8.4
-	_track(wake, "Camera:position", [[0.0, Vector3(0, 0.25, 0)], [1.8, Vector3(0, 0.3, 0)], [4.0, Vector3(0, 1.1, 0)], [5.7, Vector3(0, 1.55, 0)], [8.4, Vector3(0, 1.55, 0)]])
+	_track(wake, "Camera:position", [[0.0, Vector3(0, 0.25, 0)], [1.8, Vector3(0, 0.3, 0)], [4.0, Vector3(0, 0.75, 0)], [5.7, Vector3(0, 0.98, 0)], [8.4, Vector3(0, 0.98, 0)]])
 	_track(wake, "Camera:rotation_degrees", [[0.0, Vector3(-20, 0, -12)], [2.2, Vector3(-11, -8, -6)], [4.3, Vector3(-8, 7, 2)], [5.8, Vector3(-15, 0, 0)], [7.7, Vector3(0, 0, 0)]])
 	_track(wake, "Camera/Hand:position", [[0.0, Vector3(0.48, -0.85, 0.15)], [4.7, Vector3(0.48, -0.85, 0.15)], [5.8, Vector3(0.18, -0.17, -0.32)], [6.5, Vector3(0.19, -0.15, -0.4)], [7.6, hand_home], [8.4, hand_home]])
 	_track(wake, "Camera/Hand:rotation_degrees", [[0.0, Vector3(65, -25, 30)], [4.7, Vector3(65, -25, 30)], [5.8, Vector3(10, -15, -12)], [6.4, Vector3(-4, 8, 4)], [7.6, Vector3.ZERO]])
@@ -134,7 +135,7 @@ func begin_intro() -> void:
 
 func finish_intro() -> void:
 	animation.stop()
-	camera.position = Vector3(0, 1.55, 0)
+	camera.position = Vector3(0, 0.98, 0)
 	camera.rotation = Vector3.ZERO
 	hand.position = hand_home
 	hand.rotation = Vector3.ZERO
@@ -188,13 +189,17 @@ func _physics_process(delta: float) -> void:
 	var speed := RUN_SPEED if Input.is_action_pressed("sprint") else WALK_SPEED
 	velocity.x = move_toward(velocity.x, direction.x * speed, delta * 16)
 	velocity.z = move_toward(velocity.z, direction.z * speed, delta * 16)
-	if not is_on_floor():
+	var was_on_floor := is_on_floor()
+	if not was_on_floor:
 		velocity.y -= 19.0 * delta
 	else:
 		velocity.y = -0.1
 	if Input.is_action_just_pressed("jump") and is_on_floor():
 		velocity.y = 5.0
+	var impact_speed := -velocity.y
 	move_and_slide()
+	if not was_on_floor and is_on_floor() and impact_speed > 1.5:
+		landed.emit(impact_speed)
 	var moving := Vector2(velocity.x, velocity.z).length() > 0.3 and is_on_floor()
 	if moving:
 		bob_time += delta * speed * 3.4
@@ -203,7 +208,7 @@ func _physics_process(delta: float) -> void:
 			step_clock = 0
 			step.emit()
 	var bob := sin(bob_time) * 0.022 if moving and not reduce_motion else 0.0
-	camera.position.y = lerpf(camera.position.y, 1.55 + bob, delta * 12)
+	camera.position.y = lerpf(camera.position.y, 0.98 + bob, delta * 12)
 	hand.position = hand.position.lerp(hand_home + Vector3(bob * 0.5, bob * 0.6, 0), delta * 10)
 	camera.fov = lerpf(camera.fov, 79.0 if moving and speed > WALK_SPEED and not reduce_motion else 76.0, delta * 4)
 
