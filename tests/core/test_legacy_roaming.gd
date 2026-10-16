@@ -9,6 +9,7 @@ class FakeRonald:
 	var active := false
 	var driven := false
 	var chasing := false
+	var cinematic_turning: bool = false
 	var walked := 0.0
 	var approach := Vector3.ZERO
 	func awaken() -> void:
@@ -73,6 +74,18 @@ func _flat(a: Vector3, b: Vector3) -> float:
 func test_setup_takes_over_the_mock_ronald_and_reports_where_he_is() -> void:
 	assert_true(ronald.driven, "his own brain stays off")
 	assert_eq(board.enemy_position, Vector3(0, 0.12, 0))
+
+
+func test_cutscene_turn_and_voice_hold_the_actor_even_with_a_moving_board() -> void:
+	_rules(BoardTypes.Mode.SEEK, Vector3(10, 0, 0), 2.0)
+	ronald.cinematic_turning = true
+	_tick(1.0)
+	assert_eq(ronald.global_position, Vector3(0, 0.12, 0))
+	assert_eq(board.enemy_velocity, Vector3.ZERO)
+	assert_eq(ronald.walked, 0.0)
+	ronald.cinematic_turning = false
+	_tick(0.5)
+	assert_gt(ronald.walked, 0.0)
 
 
 func test_dormant_he_stays_asleep_and_still() -> void:

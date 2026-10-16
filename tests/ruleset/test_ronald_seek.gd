@@ -33,6 +33,18 @@ func test_waits_so_the_whisper_comes_at_least_five_seconds_before_he_arrives() -
 	rules.step(board, 0.1)
 	assert_eq(rules.speed, 0.0, "waits instead of arriving in 1 s")
 	rules.step(board, 4.0)
+	assert_eq(rules.speed, 0.0, "warning finishes before he starts walking")
+	rules.step(board, 1.0)
+	assert_eq(rules.speed, rules.tuning.search_speed)
+
+
+func test_distant_ronald_also_waits_before_approaching() -> void:
+	_hide_and_leak(&"table_1")
+	rules.step(board, 0.1)
+	assert_eq(rules.speed, 0.0)
+	rules.step(board, 4.9)
+	assert_eq(rules.speed, 0.0)
+	rules.step(board, 0.1)
 	assert_eq(rules.speed, rules.tuning.search_speed)
 
 

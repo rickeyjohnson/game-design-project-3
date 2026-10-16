@@ -56,6 +56,15 @@ func tick(board: Blackboard, delta: float) -> void:
 		board.at_target = false
 		stalker.set("chasing", false)
 		return
+	# The F5 cutaway owns the actor's turn and spoken warning. The board
+	# must not translate or rotate him until that presentation releases him.
+	if bool(stalker.get("cinematic_turning")):
+		board.enemy_position = stalker.global_position
+		board.enemy_velocity = Vector3.ZERO
+		board.at_target = false
+		stalker.set("chasing", false)
+		stalker.call("update_locomotion", 0.0, delta)
+		return
 	if mode != _mode:
 		_mode = mode
 		_path.clear()

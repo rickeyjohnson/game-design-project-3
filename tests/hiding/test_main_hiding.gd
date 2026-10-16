@@ -94,8 +94,13 @@ func test_f5_game_can_hide_at_a_real_dining_table() -> void:
 	game.call("_physics_process", 0.0)
 	assert_true(cutscene.active, "Actual hiding leak starts the cutaway")
 	assert_false(bool(player.get("control_enabled")))
+	var warning_position: Vector3 = stalker.global_position
+	director.step(0.1)
+	assert_eq(stalker.global_position, warning_position, "Board movement respects the cutscene turn")
 	cutscene.tick(true, cutscene.TURN_SECONDS + 0.01)
 	assert_eq(cutscene.voice_count, 1)
+	director.step(5.0) # even after the rules' warning delay, the voice owns the actor
+	assert_eq(stalker.global_position, warning_position, "Board movement respects the spoken warning")
 	cutscene.tick(true, cutscene.voice_seconds)
 	assert_true(bool(stalker.get("cinematic_sprinting")))
 	stalker.call("_physics_process", 0.1)
@@ -132,8 +137,12 @@ func test_f5_game_can_hide_at_a_real_dining_table() -> void:
 	assert_eq(feedback.leak_cue_count, 2, "A later hiding timeout gets a new voice cue")
 	stalker.call("_physics_process", 0.0)
 	assert_eq(game.get("phase"), "play", "Timeout reveals the player; Ronald must approach before catching")
-	for frame: int in 100:
+	for frame: int in 400:
+		var before_warning: Vector3 = stalker.global_position
+		var holding_warning: bool = bool(stalker.get("cinematic_turning"))
 		game.call("_physics_process", 0.1) # the Ruleset decides; the board walks him
+		if holding_warning:
+			assert_eq(stalker.global_position, before_warning, "Real board-driven Ronald stays still throughout the turn and voice")
 		if game.get("phase") == "caught":
 			break
 	assert_eq(game.get("phase"), "caught", "Real spawned Ronald starts his catch cutscene")

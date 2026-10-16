@@ -5,6 +5,18 @@ var board: Blackboard
 var rules: RonaldRules
 
 
+func test_safe_table_hiding_abandons_the_chase_even_with_stale_sight() -> void:
+	board.detection = BoardTypes.Detect.SEEN
+	rules.step(board, 0.1)
+	board.hide_state = BoardTypes.Hide.HIDDEN
+	board.hide_spot = &"table_1"
+	rules.step(board, 0.1)
+	assert_eq(rules.mode, BoardTypes.Mode.PATROL)
+	assert_eq(rules.speed, rules.tuning.patrol_speed)
+	rules.step(board, 3.0)
+	assert_eq(rules.mode, BoardTypes.Mode.PATROL)
+
+
 func before_each() -> void:
 	board = Blackboard.new() # writer is ANY: arrange freely
 	rules = RonaldRules.new(RonaldTuning.new())

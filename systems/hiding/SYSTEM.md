@@ -160,3 +160,5 @@ Approved F5 tuning: battery drain 1.68 percent/second while on (about 59.5 secon
 Superseding animation choice (2026-10-15): Lionel requested the old animation back. Use the original imported clip at speed_scale 1.0; remove generated running animation. Keep movement-linked footsteps and beam freezing.
 
 Table timeout catch tuning (2026-10-15): after the budget expires Ronald can catch the hidden player from within 2.0 m with a clear below-table reach ray; approach target is hidden feet plus Vector3(0, 0, 1.5), on the open side. Normal exposed catch distance stays 0.85 m. Hiding protects until exhaustion; timeout is not instant death at a distance. Beam freezing still applies.
+
+Chase/warning correction (Lionel, 2026-10-16): safe table hiding abandons chase/search and resumes patrol immediately. Timeout warning now holds Ronald stationary for the full 5 s before approach; F5 roaming also respects the entire cutscene turn and spoken line. Existing ball-pit camping remains.

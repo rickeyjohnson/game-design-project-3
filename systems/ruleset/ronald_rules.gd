@@ -78,9 +78,12 @@ func _hunt(board: Blackboard, delta: float) -> void:
 	# A leak fires once per visit; a visit ends when the player comes out or changes spots.
 	if board.hide_state == BoardTypes.Hide.EXPOSED or board.hide_spot != _seek_spot:
 		_seek_fired = false
-	var seen := board.detection == BoardTypes.Detect.SEEN
+	var safely_hidden: bool = board.hide_state == BoardTypes.Hide.HIDDEN and not board.location_leaked
+	var seen: bool = board.detection == BoardTypes.Detect.SEEN and not safely_hidden
 	var hunting_you := mode == BoardTypes.Mode.CHASE or mode == BoardTypes.Mode.SEEK
-	if hunting_you and _in_pit(board):
+	if safely_hidden and not _in_pit(board) and mode != BoardTypes.Mode.SEEK:
+		_patrol(board)
+	elif hunting_you and _in_pit(board):
 		_camp(board)
 	elif mode == BoardTypes.Mode.CHASE and seen and _distance_to_player(board) <= tuning.catch_range:
 		_catch(board)
@@ -153,8 +156,7 @@ func _chase(board: Blackboard) -> void:
 	_unseen_time = 0.0
 
 
-## "I see you": whisper, then walk to the spot, arriving no sooner than
-## seek_min_warning seconds later (SYSTEM.md §6 Q4).
+## "I see you": wait the full warning before walking to the spot.
 func _seek(board: Blackboard) -> void:
 	_seek_fired = true
 	_seek_spot = board.hide_spot
@@ -165,8 +167,7 @@ func _seek(board: Blackboard) -> void:
 	mode = BoardTypes.Mode.SEEK
 	target = board.player_position
 	_seek_elapsed = 0.0
-	var travel_time := board.enemy_position.distance_to(target) / tuning.search_speed
-	_seek_wait = maxf(0.0, tuning.seek_min_warning - travel_time)
+	_seek_wait = tuning.seek_min_warning
 	speed = 0.0 if _seek_wait > 0.0 else tuning.search_speed
 
 

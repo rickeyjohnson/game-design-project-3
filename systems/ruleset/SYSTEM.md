@@ -102,3 +102,5 @@ One at a time, multiple choice, recommended option first. Recommendations come f
 ## 11. Done means
 
 `docs/WORKFLOW.md` "Done means".
+
+Lionel-authorized integration correction (2026-10-16): safe table hiding immediately returns CHASE/INVESTIGATE to PATROL, ignoring stale detection while protected. SEEK waits the full seek_min_warning (5 s) before moving, regardless of distance; the F5 actor also remains stationary throughout the camera turn and voice. Ball-pit CAMP behavior remains unchanged.

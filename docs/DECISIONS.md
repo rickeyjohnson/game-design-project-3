@@ -95,3 +95,6 @@ Keep the demo's opening (waking up in the ball pit). When the player escapes, a 
 
 **D-023 · 2026-10-16 · Rickey · The F5 game runs the Ruleset**
 Ronald in the F5 game and the web build now does what the Ruleset says. `scripts/game.gd`'s Director holds `LegacyHiding` (Lionel's `HidingSystem` plus the game's fuses, breaker and exit), `LegacySenses` and `LegacyRoaming` (stand-ins built on the mock), and the real `RulesetSystem`; the run ends on the board's `game_state`. The mock Ronald's own brain stays in `stalker.gd` but is off while `driven`, so the flashlight freeze and the 6 s beam pounce from D-013 to D-018 no longer happen (D-021). Lionel's cutscenes, voice, chase music and catch leap stay as presentation. *Affects:* everyone; Lionel reviews the updated `tests/hiding/test_main_hiding.gd`; Aiden and Naomi replace the stand-ins with their systems; the smoke test's checks for the old brain are updated to the rules.
+
+### 2026-10-16: Lionel-authorized chase and warning repair
+Safe table hiding immediately ends pursuit/search and resumes patrol. SEEK now waits the full existing 5 s warning instead of subtracting travel time. F5 roaming honors the actor's cinematic turn/voice hold so board movement cannot bypass it. Lionel explicitly authorized ruleset and shared integration edits; no board contract change. Ball-pit CAMP remains unchanged.

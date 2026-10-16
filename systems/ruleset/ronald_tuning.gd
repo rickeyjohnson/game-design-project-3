@@ -11,7 +11,7 @@ extends Resource
 @export var lose_track_after := 2.0
 @export var search_time := 5.0
 @export var stare_time := 2.0 # silent stare before the sprint
-@export var seek_min_warning := 5.0 # least time between "I see you" and his arrival
+@export var seek_min_warning := 5.0 # stationary warning before approaching the leaked spot
 @export var camp_time := 10.0 # waiting at the ball-pit rim
 @export_group("Distances (m)")
 @export var catch_range := 3.0 # chasing this close starts the stare
